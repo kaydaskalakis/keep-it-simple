@@ -1,0 +1,105 @@
+<#
+.SYNOPSIS
+    Tests LDAP or LDAPS connectivity to a specified server.
+
+.DESCRIPTION
+    This script checks whether LDAP traffic is blocked from your device to a specific domain or server.
+    It first tests network connectivity to the specified port.
+    If successful, it attempts an LDAP bind to verify the LDAP service is accessible.
+
+.PARAMETER TargetServer
+    The domain name, hostname, or IP address of the LDAP server to test.
+
+.PARAMETER Port
+    The port number to test (default is 389 for LDAP, 636 for LDAPS).
+
+.PARAMETER UseSSL
+    Switch to indicate whether to use SSL/TLS for LDAPS connections.
+
+.EXAMPLE
+    # Test LDAP connectivity on default port 389
+    .\LDAPConnectivityTest.ps1 -TargetServer "ldap.example.com"
+
+.EXAMPLE
+    # Test LDAPS connectivity on port 636
+    .\LDAPConnectivityTest.ps1 -TargetServer "ldap.example.com" -UseSSL
+
+.EXAMPLE
+    # Test LDAP connectivity on a custom port
+    .\LDAPConnectivityTest.ps1 -TargetServer "ldap.example.com" -Port 10389
+#>
+
+param(
+    [Parameter(Mandatory = $true, HelpMessage = "Enter the LDAP server's domain name, hostname, or IP address.")]
+    [string]$TargetServer,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Enter the port number to test.")]
+    [int]$Port = 389,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Use this switch to test LDAPS connectivity.")]
+    [switch]$UseSSL
+)
+
+# Adjust port and protocol based on UseSSL switch
+if ($UseSSL) {
+    $Port = 636
+    $Protocol = "LDAPS"
+} else {
+    $Protocol = "LDAP"
+}
+
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "LDAP Connectivity Test Script" -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "Target Server : $TargetServer" -ForegroundColor Cyan
+Write-Host "Port          : $Port" -ForegroundColor Cyan
+Write-Host "Protocol      : $Protocol`n" -ForegroundColor Cyan
+
+# Step 1: Test network connectivity to the specified port
+Write-Host "Step 1: Testing network connectivity to $TargetServer on port $Port..." -ForegroundColor Yellow
+
+try {
+    $connectionResult = Test-NetConnection -ComputerName $TargetServer -Port $Port -WarningAction Stop
+
+    if ($connectionResult.TcpTestSucceeded) {
+        Write-Host "Success: Network connectivity to $TargetServer on port $Port is established.`n" -ForegroundColor Green
+
+        # Step 2: Attempt LDAP bind
+        Write-Host "Step 2: Attempting to bind to the $Protocol service..." -ForegroundColor Yellow
+
+        # Create LDAP connection
+        $ldapIdentifier = "$TargetServer`:$Port"
+        $ldapConnection = New-Object System.DirectoryServices.Protocols.LdapConnection($ldapIdentifier)
+
+        if ($UseSSL) {
+            $ldapConnection.SessionOptions.SecureSocketLayer = $true
+            $ldapConnection.SessionOptions.VerifyServerCertificate = {
+                param($connection, $certificate)
+                # Accept all certificates (not recommended for production)
+                return $true
+            }
+        }
+
+        $ldapConnection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Anonymous  # Change if authentication is required
+
+        try {
+            $ldapConnection.Bind()
+            Write-Host "Success: LDAP bind to $TargetServer on port $Port succeeded." -ForegroundColor Green
+            Write-Host "`nResult: LDAP traffic is **not blocked** from your device to $TargetServer." -ForegroundColor Green
+        } catch {
+            Write-Host "Failure: LDAP bind to $TargetServer on port $Port failed." -ForegroundColor Red
+            Write-Host "Error: $($_.Exception.Message)`n" -ForegroundColor Red
+            Write-Host "Result: LDAP traffic may be blocked or the service is unavailable." -ForegroundColor Red
+        }
+    } else {
+        Write-Host "Failure: Cannot establish network connectivity to $TargetServer on port $Port." -ForegroundColor Red
+        Write-Host "`nResult: LDAP traffic is likely blocked or the server is unreachable." -ForegroundColor Red
+    }
+} catch {
+    Write-Host "Error: An exception occurred during the connectivity test." -ForegroundColor Red
+    Write-Host "Exception Message: $($_.Exception.Message)`n" -ForegroundColor Red
+    Write-Host "Result: Unable to determine LDAP connectivity due to the error above." -ForegroundColor Red
+}
+
+Write-Host "`nScript execution completed." -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
